@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 import os
 
-# --- CONFIGURAZIONE PATH --- 
 IMG1_PATH = "object/img1.png"
 IMG2_PATH = "object/img2.png"
 OUT_DIR = "outputs"
@@ -22,14 +21,11 @@ pts1 = []
 pts2 = []
 expecting = 1
 
-# Posizione iniziale del cursore virtuale (centro della prima foto) 
 cursor_x, cursor_y = w1 // 2, h1 // 2
-
 zoom_factor = 6
 patch_radius = 30
 
 def redraw():
-    """Ridisegna i punti salvati su combo_disp"""
     global combo_disp
     combo_disp = combo_orig.copy()
     for i, pt in enumerate(pts1):
@@ -47,7 +43,6 @@ def redraw():
     cv2.putText(combo_disp, msg, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
 
 def save_point():
-    """Salva la posizione attuale del cursore virtuale"""
     global expecting
     x, y = cursor_x, cursor_y
     if expecting == 1 and x < w1:
@@ -63,7 +58,6 @@ def save_point():
     redraw()
 
 def update_lens():
-    """Aggiorna la finestrella della lente basata sul cursore virtuale"""
     ch, cw = combo_orig.shape[:2]
     y_min, y_max = max(0, cursor_y - patch_radius), min(ch, cursor_y + patch_radius)
     x_min, x_max = max(0, cursor_x - patch_radius), min(cw, cursor_x + patch_radius)
@@ -76,7 +70,6 @@ def update_lens():
         cv2.imshow("Lente", zoomed)
 
 def mouse_callback(event, x, y, flags, param):
-    """Il mouse aggiorna la posizione del cursore virtuale, e può cliccare per salvare"""
     global cursor_x, cursor_y
     if event == cv2.EVENT_MOUSEMOVE:
         cursor_x, cursor_y = x, y
@@ -87,18 +80,6 @@ cv2.namedWindow("Main", cv2.WINDOW_NORMAL)
 cv2.resizeWindow("Main", 1600, 600)
 cv2.namedWindow("Lente", cv2.WINDOW_AUTOSIZE)
 cv2.setMouseCallback("Main", mouse_callback)
-
-print("\n" + "="*50)
-print("🎯 ANNOTATORE ULTRA-PRECISO (MOUSE + TASTIERA)")
-print("="*50)
-print(" SPOSTAMENTO:")
-print(" - Usa il MOUSE per movimenti veloci.")
-print(" - Usa FRECCE o W,A,S,D per muoverti pixel per pixel.")
-print(" AZIONI:")
-print(" - Premi SPAZIO (o clicca il mouse) per SALVARE IL PUNTO.")
-print(" - Premi 'Z' per annullare l'ultimo punto salvato.")
-print(" - Premi 'Q' o ESC per chiudere e salvare il file finale.")
-print("="*50 + "\n")
 
 redraw()
 
@@ -134,7 +115,7 @@ try:
         cursor_y = max(0, min(cursor_y, combo_orig.shape[0] - 1))
 
 except KeyboardInterrupt:
-    print("\n⚠️ Interruzione forzata da terminale (Ctrl+C). Tento di salvare i punti in emergenza...")
+    pass
 
 cv2.destroyAllWindows()
 

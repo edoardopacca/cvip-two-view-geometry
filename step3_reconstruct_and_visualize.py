@@ -3,13 +3,10 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 
-# ======================
-# 1) CONFIGURAZIONE E CARICAMENTO
-# ======================
 IMG1_PATH = "object/img1.png"
 CALIB_PATH = "camera_calib.npz"
 E_RES_PATH = "outputs/E_results.npz"
-MANUAL_POINTS_PATH = "outputs/manual_high_precision.npz" # File dei tuoi click
+MANUAL_POINTS_PATH = "outputs/manual_high_precision.npz" 
 OUT_DIR = "outputs"
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -28,14 +25,10 @@ pts1_px = res["pts1_px"].astype(np.float64)
 pts1_norm = res["pts1_norm"].astype(np.float64)
 pts2_norm = res["pts2_norm"].astype(np.float64)
 
-# Filtro iniziale RANSAC (Step 2)
 pts1_n = pts1_norm[mask_cv].reshape(-1, 1, 2)
 pts2_n = pts2_norm[mask_cv].reshape(-1, 1, 2)
 pts1_p = pts1_px[mask_cv] 
 
-# ======================
-# 2) RECOVER POSE & TRIANGOLAZIONE SIFT
-# ======================
 retval, R, t, mask_pose = cv2.recoverPose(E, pts1_n, pts2_n, np.eye(3))
 mask_pose = mask_pose.ravel().astype(bool)
 
@@ -49,18 +42,13 @@ P2 = np.hstack([R, t])
 X_h = cv2.triangulatePoints(P1, P2, pts1_final_n.T, pts2_final_n.T)
 X = (X_h[:3, :] / (X_h[3, :] + 1e-12)).T 
 
-# Estrazione colori SIFT
 colors = np.array([img1_rgb[pt[1], pt[0]] / 255.0 for pt in pts1_final_px])
 
-# ======================
-# 3) INTEGRAZIONE PUNTI MANUALI (SCRITTA)
-# ======================
 X_manual = None
 if os.path.exists(MANUAL_POINTS_PATH):
     m_data = np.load(MANUAL_POINTS_PATH)
     m_p1, m_p2 = m_data['pts1'], m_data['pts2']
     
-    # Normalizzazione con K e distorsione
     m_p1_n = cv2.undistortPoints(m_p1.reshape(-1,1,2), K, dist).reshape(-1,2)
     m_p2_n = cv2.undistortPoints(m_p2.reshape(-1,1,2), K, dist).reshape(-1,2)
     
@@ -68,59 +56,38 @@ if os.path.exists(MANUAL_POINTS_PATH):
     X_manual = (m_X_h[:3, :] / (m_X_h[3, :] + 1e-12)).T
     print(f"✅ Inseriti {len(X_manual)} punti manuali della scritta.")
 
-# ======================
-# 4) PULIZIA E PREPARAZIONE PLOT
-# ======================
-# Filtro profondità positiva
 mask_z = X[:, 2] > 0
 X = X[mask_z]
 colors = colors[mask_z]
 
-# Filtro outlier (95%)
 dists = np.linalg.norm(X, axis=1)
 X = X[dists < np.quantile(dists, 0.95)]
 colors = colors[dists < np.quantile(dists, 0.95)]
 
-# --- MAPPATURA ASSI PER VISTA FOTO 1 ---
-# OpenCV (Camera) -> Matplotlib (World)
-# X_cam -> X_world
-# Y_cam -> Z_world (ma invertito: -Y diventa Altezza Su)
-# Z_cam -> Y_world (Profondità)
-
 def transform_to_plot(pts):
     x_p = pts[:, 0]
-    y_p = pts[:, 2]  # Z camera diventa Y plot (profondità)
-    z_p = -pts[:, 1] # -Y camera diventa Z plot (altezza su)
+    y_p = pts[:, 2]  
+    z_p = -pts[:, 1] 
     return x_p, y_p, z_p
 
 x_s, y_s, z_s = transform_to_plot(X)
 
-# ======================
-# 5) PLOT 3D COORDINATO
-# ======================
 fig = plt.figure(figsize=(12, 10))
 ax = fig.add_subplot(111, projection='3d')
 
-# Punti SIFT (Sfondo, Erba, Palazzo)
 ax.scatter(x_s, y_s, z_s, c=colors, s=1, alpha=0.5, label='Punti SIFT')
 
-# Punti ManualI (SCRITTA SDA BOCCONI) - In Rosso per risaltare
 if X_manual is not None:
     xm, ym, zm = transform_to_plot(X_manual)
     ax.scatter(xm, ym, zm, c='red', s=30, edgecolors='black', label='Scritta (Manuale)')
-    
-    # Aggiunta per l'assignment: unisce i punti per creare i contorni delle lettere
     ax.plot(xm, ym, zm, c='red', linewidth=2, label='Outline Lettere')
 
-# --- SETTAGGI VISTA ---
-# elev=0, azim=-90 guarda dritto verso la profondità (come la lente)
 ax.view_init(elev=5, azim=-90)
 
 ax.set_xlabel('X (Sinistra-Destra)')
 ax.set_ylabel('Profondità (Z camera)')
 ax.set_zlabel('Altezza (Y camera)')
 
-# Mantieni le proporzioni reali
 ax.set_box_aspect([np.ptp(x_s), np.ptp(y_s), np.ptp(z_s)]) 
 
 plt.title("Vista 3D allineata alla Fotocamera 1")
