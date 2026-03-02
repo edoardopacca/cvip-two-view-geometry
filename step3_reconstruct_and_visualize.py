@@ -20,25 +20,48 @@ dist = cal["dist"].astype(np.float64)
 
 res = np.load(E_RES_PATH, allow_pickle=True)
 
+# ============================================================
+# MODIFICA 1: USA SOLO LA TUA SOLUZIONE (E_8 + mask_8)
+# ============================================================
+if "E_8" not in res:
+    raise RuntimeError("E_8 non presente in E_results.npz: rigenera lo step2 salvando E_8.")
+
 E = res["E_8"].astype(np.float64)
 
-if "mask_8" in res:
-    mask_in = res["mask_8"].astype(bool)
-else:
-    mask_in = res["mask_cv"].astype(bool)
-    print("⚠️ Nota: 'mask_8' non trovata in E_results.npz, uso mask_cv come filtro punti.")
+if "mask_8" not in res:
+    raise RuntimeError(
+        "mask_8 non presente in E_results.npz: non posso usare SOLO la tua E_8 in modo coerente.\n"
+        "Rigenera E_results.npz con lo step2 che salva mask_8 (o modifica step2 per salvarla)."
+    )
+
+mask_in = res["mask_8"].astype(bool)
+print("✅ Uso SOLO E_8 + mask_8 (nessun fallback su OpenCV)")
+
+# ------------------------------------------------------------
+# Caricamento punti
+# ------------------------------------------------------------
+if "pts1_px" not in res or "pts1_norm" not in res or "pts2_norm" not in res:
+    raise RuntimeError(
+        "Nel file E_results.npz mancano pts1_px / pts1_norm / pts2_norm.\n"
+        "Assicurati che step2 salvi questi array."
+    )
 
 pts1_px = res["pts1_px"].astype(np.float64)
 pts1_norm = res["pts1_norm"].astype(np.float64)
 pts2_norm = res["pts2_norm"].astype(np.float64)
 
+# opzionale: per distinguere punti manuali nel plot
 src_is_manual = res["src_is_manual"].astype(bool) if "src_is_manual" in res else np.zeros(len(pts1_px), dtype=bool)
 
+# Applica solo la tua mask_8
 pts1_n = pts1_norm[mask_in].reshape(-1, 1, 2)
 pts2_n = pts2_norm[mask_in].reshape(-1, 1, 2)
 pts1_p = pts1_px[mask_in]
 is_manual = src_is_manual[mask_in]
 
+# ------------------------------------------------------------
+# recoverPose con la tua E_8 (cameraMatrix = I perché punti norm)
+# ------------------------------------------------------------
 retval, R, t, mask_pose = cv2.recoverPose(E, pts1_n, pts2_n, np.eye(3))
 mask_pose = mask_pose.ravel().astype(bool)
 
@@ -47,12 +70,16 @@ pts2_final_n = pts2_n[mask_pose].reshape(-1, 2)
 pts1_final_px = pts1_p[mask_pose].astype(np.int32)
 is_manual_final = is_manual[mask_pose]
 
+# ------------------------------------------------------------
+# Triangolazione (coordinate normalizzate)
+# ------------------------------------------------------------
 P1 = np.hstack([np.eye(3), np.zeros((3, 1))])
 P2 = np.hstack([R, t])
 
 X_h = cv2.triangulatePoints(P1, P2, pts1_final_n.T, pts2_final_n.T)
 X = (X_h[:3, :] / (X_h[3, :] + 1e-12)).T
 
+# Colori (nota: se pts1_px sono undistorti e img1 è distorta, i colori possono essere leggermente “shiftati”)
 colors_bgr = np.array([img1_rgb[
     np.clip(pt[1], 0, img1_rgb.shape[0] - 1),
     np.clip(pt[0], 0, img1_rgb.shape[1] - 1)
@@ -118,6 +145,6 @@ ax.set_xlim(xmid - rx / 2, xmid + rx / 2)
 ax.set_ylim(ymid - ry / 2, ymid + ry / 2)
 ax.set_zlim(zmid - rx / 2, zmid + rx / 2)
 
-plt.title("Vista 3D allineata alla Fotocamera 1 (E_8)")
+plt.title("Vista 3D allineata alla Fotocamera 1 (SOLO E_8 + mask_8)")
 plt.legend()
 plt.show()
