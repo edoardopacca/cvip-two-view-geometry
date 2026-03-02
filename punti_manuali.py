@@ -23,15 +23,17 @@ IMG2_PATH = "object/img2.JPG"
 CALIB_PATH = "camera_calib.npz"
 
 OUT_DIR = "outputs"
+MANUAL_DIR = "manual_points"
 os.makedirs(OUT_DIR, exist_ok=True)
+os.makedirs(MANUAL_DIR, exist_ok=True)
 
 E_RESULTS_PATH = os.path.join(OUT_DIR, "E_results.npz")
 MATCHES_F_PATH = os.path.join(OUT_DIR, "matches_inliers_px.npz")  # fallback (di solito distorto)
 
 # Ogni avvio = una sessione diversa (file diversi)
 SESSION_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
-SESSION_FILE = os.path.join(OUT_DIR, f"manual_session_{SESSION_ID}.npz")
-FINAL_FILE   = os.path.join(OUT_DIR, f"manual_high_precision_{SESSION_ID}.npz")
+SESSION_FILE = os.path.join(MANUAL_DIR, f"manual_session_{SESSION_ID}.npz")
+FINAL_FILE   = os.path.join(MANUAL_DIR, f"manual_high_precision_{SESSION_ID}.npz")
 
 print(f"🆔 Sessione: {SESSION_ID}")
 print(f"💾 Autosave sessione: {SESSION_FILE}")
