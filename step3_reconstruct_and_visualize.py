@@ -8,15 +8,14 @@ IMG1_PATH = "object/img1.JPG"
 CALIB_PATH = "camera_calib.npz"
 E_RES_PATH = "outputs/E_results.npz"
 
-# Prende TUTTI i file salvati dalle sessioni (es: manual_high_precision_YYYYMMDD_HHMMSS.npz)
 OUT_DIR = "outputs"
 MANUAL_GLOB = os.path.join(OUT_DIR, "manual_high_precision*.npz")
-# (compatibilità: se hai anche un vecchio file fisso)
 MANUAL_POINTS_PATH = os.path.join(OUT_DIR, "manual_high_precision.npz")
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
 img1 = cv2.imread(IMG1_PATH)
+assert img1 is not None, "Errore caricamento img1."
 img1_rgb = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
 
 cal = np.load(CALIB_PATH)
@@ -24,16 +23,28 @@ K = cal["K"].astype(np.float64)
 dist = cal["dist"].astype(np.float64)
 
 res = np.load(E_RES_PATH)
-E = res["E_cv"].astype(np.float64)
-mask_cv = res["mask_cv"].astype(bool)
+
+# =======================
+# USA LA TUA ESSENTIAL (8-point)
+# =======================
+E = res["E_8"].astype(np.float64)
+
+# Se esiste una mask per il tuo RANSAC, usala. Altrimenti fallback su mask_cv.
+if "mask_8" in res:
+    mask_in = res["mask_8"].astype(bool)
+else:
+    # nel tuo file avevi salvato mask_cv ma non mask_8: fallback
+    mask_in = res["mask_cv"].astype(bool)
+    print("⚠️ Nota: 'mask_8' non trovata in E_results.npz, uso mask_cv come filtro punti.")
 
 pts1_px = res["pts1_px"].astype(np.float64)
 pts1_norm = res["pts1_norm"].astype(np.float64)
 pts2_norm = res["pts2_norm"].astype(np.float64)
 
-pts1_n = pts1_norm[mask_cv].reshape(-1, 1, 2)
-pts2_n = pts2_norm[mask_cv].reshape(-1, 1, 2)
-pts1_p = pts1_px[mask_cv]
+# punti normalizzati (undistorti) per recoverPose/triangolazione
+pts1_n = pts1_norm[mask_in].reshape(-1, 1, 2)
+pts2_n = pts2_norm[mask_in].reshape(-1, 1, 2)
+pts1_p = pts1_px[mask_in]
 
 retval, R, t, mask_pose = cv2.recoverPose(E, pts1_n, pts2_n, np.eye(3))
 mask_pose = mask_pose.ravel().astype(bool)
@@ -48,15 +59,15 @@ P2 = np.hstack([R, t])
 X_h = cv2.triangulatePoints(P1, P2, pts1_final_n.T, pts2_final_n.T)
 X = (X_h[:3, :] / (X_h[3, :] + 1e-12)).T
 
+# colori presi da img1 originale (pixel distorti)
+# (se vuoi colori perfetti su undistorto, si può adattare)
 colors = np.array([img1_rgb[pt[1], pt[0]] / 255.0 for pt in pts1_final_px])
 
 # ------------------ PUNTI MANUALI: CARICA TUTTI I FILE ------------------
 def load_all_manual_files(out_dir):
     files = sorted(glob.glob(MANUAL_GLOB))
-    # evita doppioni se manual_high_precision.npz è già incluso dal glob
     if os.path.exists(MANUAL_POINTS_PATH) and MANUAL_POINTS_PATH not in files:
         files.append(MANUAL_POINTS_PATH)
-    # rimuovi eventuali session file se per sbaglio matchano (in genere non matchano)
     files = [f for f in files if os.path.basename(f).startswith("manual_high_precision")]
     return sorted(set(files))
 
@@ -87,11 +98,18 @@ if len(manual_files) > 0:
             m_p1 = m_p1[:n].astype(np.float64)
             m_p2 = m_p2[:n].astype(np.float64)
 
-            # pixel -> punti normalizzati (undistort + intrinseci)
-            m_p1_n = cv2.undistortPoints(m_p1.reshape(-1, 1, 2), K, dist).reshape(-1, 2)
-            m_p2_n = cv2.undistortPoints(m_p2.reshape(-1, 1, 2), K, dist).reshape(-1, 2)
+            # Se i punti manuali sono stati raccolti con il tool UNDISTORT:
+            # - sono già pixel undistorti -> per normalizzarli basta K e dist=None/zeros
+            und_flag = int(m_data["undistorted"][0]) if "undistorted" in m_data else 0
 
-            # triangolazione con la stessa posa (R,t)
+            if und_flag == 1:
+                m_p1_n = cv2.undistortPoints(m_p1.reshape(-1, 1, 2), K, None).reshape(-1, 2)
+                m_p2_n = cv2.undistortPoints(m_p2.reshape(-1, 1, 2), K, None).reshape(-1, 2)
+            else:
+                # tool vecchio (distorto): serve anche dist
+                m_p1_n = cv2.undistortPoints(m_p1.reshape(-1, 1, 2), K, dist).reshape(-1, 2)
+                m_p2_n = cv2.undistortPoints(m_p2.reshape(-1, 1, 2), K, dist).reshape(-1, 2)
+
             m_X_h = cv2.triangulatePoints(P1, P2, m_p1_n.T, m_p2_n.T)
             m_X = (m_X_h[:3, :] / (m_X_h[3, :] + 1e-12)).T
 
@@ -110,9 +128,11 @@ else:
     print("ℹ️ Nessun file manual_high_precision*.npz trovato in outputs/")
 
 # ------------------ FILTRI SUI PUNTI SIFT ------------------
-mask_z = X[:, 2] > 0
-X = X[mask_z]
-colors = colors[mask_z]
+# cheirality: davanti alla camera 1 e camera 2
+X2 = (R @ X.T + t).T
+mask_cheir = (X[:, 2] > 0) & (X2[:, 2] > 0)
+X = X[mask_cheir]
+colors = colors[mask_cheir]
 
 dists = np.linalg.norm(X, axis=1)
 th = np.quantile(dists, 0.95)
@@ -121,8 +141,6 @@ X = X[mask_dist]
 colors = colors[mask_dist]
 
 def transform_to_plot(pts):
-    # Camera coords: (X, Y, Z)
-    # Plot: x = X, y = Z (profondità), z = -Y (altezza)
     x_p = pts[:, 0]
     y_p = pts[:, 2]
     z_p = -pts[:, 1]
@@ -135,7 +153,6 @@ ax = fig.add_subplot(111, projection="3d")
 
 ax.scatter(x_s, y_s, z_s, c=colors, s=1, alpha=0.5, label="Punti SIFT")
 
-# manual in rosso (SENZA collegare i punti)
 if X_manual is not None:
     xm, ym, zm = transform_to_plot(X_manual)
     ax.scatter(xm, ym, zm, c="red", s=30, edgecolors="black", label="Punti Manuali")
@@ -146,14 +163,11 @@ ax.set_xlabel("X (Sinistra-Destra)")
 ax.set_ylabel("Profondità (Z camera)")
 ax.set_zlabel("Altezza (Y camera)")
 
-# --- stessa scala visiva per Z e X ---
 def safe_ptp(a, eps=1e-9):
     r = float(np.ptp(a))
     return r if r > eps else 1.0
 
-x_all = x_s
-y_all = y_s
-z_all = z_s
+x_all, y_all, z_all = x_s, y_s, z_s
 if X_manual is not None:
     x_all = np.concatenate([x_s, xm])
     y_all = np.concatenate([y_s, ym])
@@ -171,6 +185,6 @@ ax.set_xlim(xmid - rx / 2, xmid + rx / 2)
 ax.set_ylim(ymid - ry / 2, ymid + ry / 2)
 ax.set_zlim(zmid - rx / 2, zmid + rx / 2)
 
-plt.title("Vista 3D allineata alla Fotocamera 1")
+plt.title("Vista 3D allineata alla Fotocamera 1 (E_8)")
 plt.legend()
 plt.show()
