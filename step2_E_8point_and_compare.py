@@ -4,8 +4,8 @@ import cv2
 
 CALIB_PATH  = "camera_calib.npz"
 MATCHES_PATH = "outputs/matches_inliers_px.npz"
-IMG1_PATH = "object/img1.png"
-IMG2_PATH = "object/img2.png"
+IMG1_PATH = "object/img1.JPG"
+IMG2_PATH = "object/img2.JPG"
 
 OUT_DIR = "outputs"
 os.makedirs(OUT_DIR, exist_ok=True)

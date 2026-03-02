@@ -2,8 +2,8 @@ import os
 import cv2
 import numpy as np
 
-img1_path = "object/img1.png"
-img2_path = "object/img2.png"
+img1_path = "object/img1.JPG"
+img2_path = "object/img2.JPG"
 
 out_dir = "outputs"
 os.makedirs(out_dir, exist_ok=True)
@@ -17,7 +17,7 @@ gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
 
 use_sift = hasattr(cv2, "SIFT_create")
 if use_sift:
-    feat = cv2.SIFT_create(nfeatures=100000)
+    feat = cv2.SIFT_create(nfeatures=10000)
     norm = cv2.NORM_L2
 else:
     print("SIFT non disponibile: uso ORB (meno robusto).")

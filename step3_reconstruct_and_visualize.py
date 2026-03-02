@@ -1,13 +1,19 @@
 import os
+import glob
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 
-IMG1_PATH = "object/img1.png"
+IMG1_PATH = "object/img1.JPG"
 CALIB_PATH = "camera_calib.npz"
 E_RES_PATH = "outputs/E_results.npz"
-MANUAL_POINTS_PATH = "outputs/manual_high_precision.npz" 
+
+# Prende TUTTI i file salvati dalle sessioni (es: manual_high_precision_YYYYMMDD_HHMMSS.npz)
 OUT_DIR = "outputs"
+MANUAL_GLOB = os.path.join(OUT_DIR, "manual_high_precision*.npz")
+# (compatibilità: se hai anche un vecchio file fisso)
+MANUAL_POINTS_PATH = os.path.join(OUT_DIR, "manual_high_precision.npz")
+
 os.makedirs(OUT_DIR, exist_ok=True)
 
 img1 = cv2.imread(IMG1_PATH)
@@ -27,7 +33,7 @@ pts2_norm = res["pts2_norm"].astype(np.float64)
 
 pts1_n = pts1_norm[mask_cv].reshape(-1, 1, 2)
 pts2_n = pts2_norm[mask_cv].reshape(-1, 1, 2)
-pts1_p = pts1_px[mask_cv] 
+pts1_p = pts1_px[mask_cv]
 
 retval, R, t, mask_pose = cv2.recoverPose(E, pts1_n, pts2_n, np.eye(3))
 mask_pose = mask_pose.ravel().astype(bool)
@@ -40,55 +46,130 @@ P1 = np.hstack([np.eye(3), np.zeros((3, 1))])
 P2 = np.hstack([R, t])
 
 X_h = cv2.triangulatePoints(P1, P2, pts1_final_n.T, pts2_final_n.T)
-X = (X_h[:3, :] / (X_h[3, :] + 1e-12)).T 
+X = (X_h[:3, :] / (X_h[3, :] + 1e-12)).T
 
 colors = np.array([img1_rgb[pt[1], pt[0]] / 255.0 for pt in pts1_final_px])
 
-X_manual = None
-if os.path.exists(MANUAL_POINTS_PATH):
-    m_data = np.load(MANUAL_POINTS_PATH)
-    m_p1, m_p2 = m_data['pts1'], m_data['pts2']
-    
-    m_p1_n = cv2.undistortPoints(m_p1.reshape(-1,1,2), K, dist).reshape(-1,2)
-    m_p2_n = cv2.undistortPoints(m_p2.reshape(-1,1,2), K, dist).reshape(-1,2)
-    
-    m_X_h = cv2.triangulatePoints(P1, P2, m_p1_n.T, m_p2_n.T)
-    X_manual = (m_X_h[:3, :] / (m_X_h[3, :] + 1e-12)).T
-    print(f"✅ Inseriti {len(X_manual)} punti manuali della scritta.")
+# ------------------ PUNTI MANUALI: CARICA TUTTI I FILE ------------------
+def load_all_manual_files(out_dir):
+    files = sorted(glob.glob(MANUAL_GLOB))
+    # evita doppioni se manual_high_precision.npz è già incluso dal glob
+    if os.path.exists(MANUAL_POINTS_PATH) and MANUAL_POINTS_PATH not in files:
+        files.append(MANUAL_POINTS_PATH)
+    # rimuovi eventuali session file se per sbaglio matchano (in genere non matchano)
+    files = [f for f in files if os.path.basename(f).startswith("manual_high_precision")]
+    return sorted(set(files))
 
+manual_files = load_all_manual_files(OUT_DIR)
+
+X_manual = None
+if len(manual_files) > 0:
+    X_list = []
+    total_pts = 0
+
+    for f in manual_files:
+        try:
+            m_data = np.load(f)
+            if "pts1" not in m_data or "pts2" not in m_data:
+                print(f"⚠️ Skip {os.path.basename(f)}: manca pts1/pts2.")
+                continue
+
+            m_p1 = m_data["pts1"]
+            m_p2 = m_data["pts2"]
+
+            n = min(len(m_p1), len(m_p2))
+            if n == 0:
+                print(f"⚠️ Skip {os.path.basename(f)}: 0 punti.")
+                continue
+            if len(m_p1) != len(m_p2):
+                print(f"⚠️ {os.path.basename(f)}: punti non accoppiati ({len(m_p1)} vs {len(m_p2)}). Uso i primi {n}.")
+
+            m_p1 = m_p1[:n].astype(np.float64)
+            m_p2 = m_p2[:n].astype(np.float64)
+
+            # pixel -> punti normalizzati (undistort + intrinseci)
+            m_p1_n = cv2.undistortPoints(m_p1.reshape(-1, 1, 2), K, dist).reshape(-1, 2)
+            m_p2_n = cv2.undistortPoints(m_p2.reshape(-1, 1, 2), K, dist).reshape(-1, 2)
+
+            # triangolazione con la stessa posa (R,t)
+            m_X_h = cv2.triangulatePoints(P1, P2, m_p1_n.T, m_p2_n.T)
+            m_X = (m_X_h[:3, :] / (m_X_h[3, :] + 1e-12)).T
+
+            X_list.append(m_X)
+            total_pts += len(m_X)
+            print(f"✅ Caricati {len(m_X)} punti da {os.path.basename(f)}")
+        except Exception as e:
+            print(f"⚠️ Skip {os.path.basename(f)}: errore lettura ({e})")
+
+    if len(X_list) > 0:
+        X_manual = np.vstack(X_list)
+        print(f"🎯 Totale punti manuali triangolati: {total_pts} (da {len(X_list)} file)")
+    else:
+        print("⚠️ Nessun punto manuale valido trovato.")
+else:
+    print("ℹ️ Nessun file manual_high_precision*.npz trovato in outputs/")
+
+# ------------------ FILTRI SUI PUNTI SIFT ------------------
 mask_z = X[:, 2] > 0
 X = X[mask_z]
 colors = colors[mask_z]
 
 dists = np.linalg.norm(X, axis=1)
-X = X[dists < np.quantile(dists, 0.95)]
-colors = colors[dists < np.quantile(dists, 0.95)]
+th = np.quantile(dists, 0.95)
+mask_dist = dists < th
+X = X[mask_dist]
+colors = colors[mask_dist]
 
 def transform_to_plot(pts):
+    # Camera coords: (X, Y, Z)
+    # Plot: x = X, y = Z (profondità), z = -Y (altezza)
     x_p = pts[:, 0]
-    y_p = pts[:, 2]  
-    z_p = -pts[:, 1] 
+    y_p = pts[:, 2]
+    z_p = -pts[:, 1]
     return x_p, y_p, z_p
 
 x_s, y_s, z_s = transform_to_plot(X)
 
 fig = plt.figure(figsize=(12, 10))
-ax = fig.add_subplot(111, projection='3d')
+ax = fig.add_subplot(111, projection="3d")
 
-ax.scatter(x_s, y_s, z_s, c=colors, s=1, alpha=0.5, label='Punti SIFT')
+ax.scatter(x_s, y_s, z_s, c=colors, s=1, alpha=0.5, label="Punti SIFT")
 
+# manual in rosso (SENZA collegare i punti)
 if X_manual is not None:
     xm, ym, zm = transform_to_plot(X_manual)
-    ax.scatter(xm, ym, zm, c='red', s=30, edgecolors='black', label='Scritta (Manuale)')
-    ax.plot(xm, ym, zm, c='red', linewidth=2, label='Outline Lettere')
+    ax.scatter(xm, ym, zm, c="red", s=30, edgecolors="black", label="Punti Manuali")
 
 ax.view_init(elev=5, azim=-90)
 
-ax.set_xlabel('X (Sinistra-Destra)')
-ax.set_ylabel('Profondità (Z camera)')
-ax.set_zlabel('Altezza (Y camera)')
+ax.set_xlabel("X (Sinistra-Destra)")
+ax.set_ylabel("Profondità (Z camera)")
+ax.set_zlabel("Altezza (Y camera)")
 
-ax.set_box_aspect([np.ptp(x_s), np.ptp(y_s), np.ptp(z_s)]) 
+# --- stessa scala visiva per Z e X ---
+def safe_ptp(a, eps=1e-9):
+    r = float(np.ptp(a))
+    return r if r > eps else 1.0
+
+x_all = x_s
+y_all = y_s
+z_all = z_s
+if X_manual is not None:
+    x_all = np.concatenate([x_s, xm])
+    y_all = np.concatenate([y_s, ym])
+    z_all = np.concatenate([z_s, zm])
+
+rx = safe_ptp(x_all)
+ry = safe_ptp(y_all)
+
+xmid = 0.5 * (x_all.min() + x_all.max())
+ymid = 0.5 * (y_all.min() + y_all.max())
+zmid = 0.5 * (z_all.min() + z_all.max())
+
+ax.set_box_aspect([rx, ry, rx])
+ax.set_xlim(xmid - rx / 2, xmid + rx / 2)
+ax.set_ylim(ymid - ry / 2, ymid + ry / 2)
+ax.set_zlim(zmid - rx / 2, zmid + rx / 2)
 
 plt.title("Vista 3D allineata alla Fotocamera 1")
 plt.legend()
