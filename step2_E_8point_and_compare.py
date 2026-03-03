@@ -4,7 +4,7 @@ import numpy as np
 import cv2
 
 CALIB_PATH   = "camera_calib.npz"
-MATCHES_PATH = "outputs/matches_inliers_px.npz"
+MATCHES_PATH = "outputs/matches_px.npz"
 IMG1_PATH    = "object/img1.JPG"
 IMG2_PATH    = "object/img2.JPG"
 

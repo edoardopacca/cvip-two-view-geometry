@@ -41,35 +41,28 @@ print(f"Keypoints: img1={len(kp1)} img2={len(kp2)}")
 print(f"Matches dopo ratio test: {len(good)}")
 assert len(good) >= 12, "Troppi pochi match: prova a cambiare ratio o usa immagini con più texture."
 
-pts1 = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
-pts2 = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+# Punti corrispondenti in pixel (DISTORTI, dalle immagini originali)
+pts1 = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 2)
+pts2 = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 2)
 
-F, mask = cv2.findFundamentalMat(
-    pts1, pts2,
-    method=cv2.FM_RANSAC,
-    ransacReprojThreshold=1.0,
-    confidence=0.999,
-    maxIters=5000
-)
-assert F is not None and mask is not None, "RANSAC fallito (F None)."
-
-mask = mask.ravel().astype(bool)
-in1 = pts1[mask].reshape(-1, 2)
-in2 = pts2[mask].reshape(-1, 2)
-
-print(f"Inlier RANSAC: {in1.shape[0]} / {pts1.shape[0]}")
-
-inlier_matches = [m for m, keep in zip(good, mask) if keep]
+# Visualizzazione di tutti i match post-ratio-test (senza RANSAC)
 vis = cv2.drawMatches(
     img1, kp1, img2, kp2,
-    inlier_matches, None,
+    good, None,
     flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS
 )
-cv2.imwrite(os.path.join(out_dir, "inlier_matches.png"), vis)
+cv2.imwrite(os.path.join(out_dir, "good_matches.png"), vis)
 
-np.savez(os.path.join(out_dir, "matches_inliers_px.npz"),
-         pts1=in1, pts2=in2, F=F)
+# Salva tutti i match post-ratio-test (senza filtraggio RANSAC)
+np.savez(
+    os.path.join(out_dir, "matches_px.npz"),
+    pts1=pts1,
+    pts2=pts2,
+    undistorted=np.array([0], dtype=np.int32),   # esplicito: pixel distorti
+    use_sift=np.array([1 if use_sift else 0], dtype=np.int32),
+    ratio=np.array([ratio], dtype=np.float64),
+)
 
 print("Salvati:")
-print(" - outputs/inlier_matches.png")
-print(" - outputs/matches_inliers_px.npz")
+print(" - outputs/good_matches.png")
+print(" - outputs/matches_px.npz")
