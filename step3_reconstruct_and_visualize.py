@@ -90,7 +90,7 @@ X2 = (R @ X.T + t).T
 mask_cheir = (X[:, 2] > 0) & (X2[:, 2] > 0)
 
 dists_all = np.linalg.norm(X, axis=1)
-th = np.quantile(dists_all[mask_cheir], 0.95) if np.sum(mask_cheir) > 0 else np.inf
+th = np.quantile(dists_all[mask_cheir], 0.9) if np.sum(mask_cheir) > 0 else np.inf
 mask_dist = dists_all < th
 
 mask_keep = mask_cheir & mask_dist
