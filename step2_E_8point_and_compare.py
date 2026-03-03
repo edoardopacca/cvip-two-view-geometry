@@ -43,7 +43,7 @@ cv2.imwrite(os.path.join(OUT_DIR, "img1_undistorted.png"), img1_u)
 cv2.imwrite(os.path.join(OUT_DIR, "img2_undistorted.png"), img2_u)
 
 def load_all_manual_points(out_dir):
-    files = sorted(glob.glob(os.path.join(out_dir, "manual_high_precision*.npz")))
+    files = sorted(glob.glob(os.path.join(out_dir, "*.npz")))
     pts1_list, pts2_list = [], []
     used_files = []
 
