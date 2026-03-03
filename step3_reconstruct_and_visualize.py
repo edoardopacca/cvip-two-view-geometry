@@ -121,7 +121,7 @@ if np.sum(sift_mask) > 0:
 
 if np.sum(manual_mask) > 0:
     xm, ym, zm = transform_to_plot(X[manual_mask])
-    ax.scatter(xm, ym, zm, c="red", s=30, edgecolors="black", label=f"Manuali ({n_manual})")
+    ax.scatter(xm, ym, zm, c="red", s=15, edgecolors="black", label=f"Manuali ({n_manual})")
 
 ax.view_init(elev=5, azim=-90)
 ax.set_xlabel("X (Sinistra-Destra)")
