@@ -53,7 +53,7 @@ rms, K, dist, rvecs, tvecs = cv2.calibrateCamera(
 mean_err = 0.0
 for i in range(len(objpoints)):
     proj, _ = cv2.projectPoints(objpoints[i], rvecs[i], tvecs[i], K, dist)
-    err = cv2.norm(imgpoints[i], proj, cv2.NORM_L2) / len(proj)
+    err = cv2.norm(imgpoints[i], proj, cv2.NORM_L2) / np.sqrt(len(proj))
     mean_err += err
 mean_err /= len(objpoints)
 
