@@ -4,13 +4,13 @@ import os
 from datetime import datetime
 
 # ============================================================
-#  MANUAL POINTS TOOL (DISTORTED MODE)
-#  - Mostra img1/img2 ORIGINALI (DISTORTE, come i match SIFT)
-#  - I punti salvati (pts1/pts2) sono PIXEL DISTORTI (coordinate immagine originale)
-#  - NESSUNA linea epipolare (no dipendenza da OpenCV/Step2)
+#  MANUAL POINTS TOOL (DISTORTED MODE) - SINGLE FILE
+#  - Mostra img1/img2 ORIGINALI (DISTORTE)
+#  - I punti salvati (pts1/pts2) sono PIXEL DISTORTI
+#  - Salva SOLO 1 file: manual_high_precision_<SESSION_ID>.npz (autosave continuo)
 #
-#  ✅ NOTA per il tuo Step 2:
-#  Tratta questi punti manuali ESATTAMENTE come i punti SIFT:
+#  ✅ NOTA per Step 2:
+#  Tratta questi punti come i SIFT (distorti):
 #     p_norm = cv2.undistortPoints(p_px.reshape(-1,1,2), K, dist).reshape(-1,2)
 # ============================================================
 
@@ -24,16 +24,14 @@ MANUAL_DIR = "manual_points"
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(MANUAL_DIR, exist_ok=True)
 
-# Ogni avvio = una sessione diversa (file diversi)
+# Unica sessione = un unico file, sempre aggiornato
 SESSION_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
-SESSION_FILE = os.path.join(MANUAL_DIR, f"manual_session_{SESSION_ID}.npz")
-FINAL_FILE   = os.path.join(MANUAL_DIR, f"manual_high_precision_{SESSION_ID}.npz")
+FINAL_FILE = os.path.join(MANUAL_DIR, f"manual_high_precision_{SESSION_ID}.npz")
 
 print(f"🆔 Sessione: {SESSION_ID}")
-print(f"💾 Autosave sessione: {SESSION_FILE}")
-print(f"🏁 File finale (se punti pari): {FINAL_FILE}")
+print(f"💾 File unico (autosave): {FINAL_FILE}")
 
-# ------------------ LOAD CALIB (solo per salvare K/dist nel file; UI resta distorta) ------------------
+# ------------------ LOAD CALIB ------------------
 cal = np.load(CALIB_PATH)
 K = cal["K"].astype(np.float64)
 dist = cal["dist"].astype(np.float64)
@@ -65,9 +63,10 @@ def atomic_save_npz(path, **arrays):
     np.savez(tmp, **arrays)
     os.replace(tmp, path)
 
-def save_session():
+def save_state():
+    # Salva SEMPRE nello stesso file (unico)
     atomic_save_npz(
-        SESSION_FILE,
+        FINAL_FILE,
         pts1=np.array(pts1, dtype=np.float32),
         pts2=np.array(pts2, dtype=np.float32),
         expecting=np.array([expecting], dtype=np.int32),
@@ -79,26 +78,8 @@ def save_session():
         undistorted=np.array([0], dtype=np.int32),  # 0 = DISTORTI
         K=K,
         dist=dist,
+        is_complete=np.array([1 if (len(pts1) == len(pts2) and len(pts1) > 0) else 0], dtype=np.int32),
     )
-
-def save_final_if_possible():
-    if len(pts1) == len(pts2) and len(pts1) > 0:
-        np.savez(
-            FINAL_FILE,
-            pts1=np.array(pts1, dtype=np.float32),
-            pts2=np.array(pts2, dtype=np.float32),
-            img1=np.array([IMG1_PATH]),
-            img2=np.array([IMG2_PATH]),
-            session_id=np.array([SESSION_ID]),
-            undistorted=np.array([0], dtype=np.int32),
-            K=K,
-            dist=dist,
-        )
-        print(f"🎉 Salvato file finale: {FINAL_FILE}  ({len(pts1)} punti)")
-        return True
-    else:
-        print("⚠️ Non posso salvare finale: punti dispari o zero.")
-        return False
 
 # ------------------ DRAWING ------------------
 def redraw():
@@ -120,7 +101,6 @@ def redraw():
         if i < len(pts1):
             cv2.line(combo_disp, pts1[i], pt_disp, (255, 255, 0), 1)
 
-    # testi UI
     msg = "1. FOTO SINISTRA (DISTORTED)" if expecting == 1 else "2. FOTO DESTRA (DISTORTED)"
     color = (0, 0, 255) if expecting == 1 else (0, 255, 0)
     cv2.putText(combo_disp, msg, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
@@ -128,7 +108,7 @@ def redraw():
     info = f"SX:{len(pts1)}  DX:{len(pts2)}  | click: {'SX' if expecting==1 else 'DX'}"
     cv2.putText(combo_disp, info, (50, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
 
-# --------- LENTE: usa il frame mostrato (temp_disp) ----------
+# --------- LENTE ----------
 def update_lens(frame_for_lens):
     ch, cw = frame_for_lens.shape[:2]
     y_min, y_max = max(0, cursor_y - patch_radius), min(ch, cursor_y + patch_radius)
@@ -142,7 +122,6 @@ def update_lens(frame_for_lens):
             interpolation=cv2.INTER_NEAREST
         )
         zh, zw = zoomed.shape[:2]
-        # crocino BLU dentro la lente
         cv2.line(zoomed, (zw // 2, 0), (zw // 2, zh), (255, 0, 0), 1)
         cv2.line(zoomed, (0, zh // 2), (zw, zh // 2), (255, 0, 0), 1)
         cv2.imshow("Lente", zoomed)
@@ -163,7 +142,7 @@ def save_point():
         print("⚠️ Cursore fuori posto! Spostalo nell'immagine corretta.")
 
     redraw()
-    save_session()
+    save_state()
 
 def mouse_callback(event, x, y, flags, param):
     global cursor_x, cursor_y
@@ -179,15 +158,15 @@ cv2.namedWindow("Lente", cv2.WINDOW_AUTOSIZE)
 cv2.setMouseCallback("Main", mouse_callback)
 
 redraw()
-save_session()
+save_state()
 
 print("\nControlli:")
 print("  - Click sinistro: salva punto (alternando SX -> DX)")
 print("  - Spazio: salva punto (come click)")
 print("  - WASD / frecce: muovi cursore di 1px")
 print("  - z: undo ultimo punto (gestisce SX/DX)")
-print("  - f: salva file finale (solo se punti pari)")
-print("  - q o ESC: esci (autosave sempre, finale solo se punti pari)\n")
+print("  - f: stampa stato (il file è già autosalvato)")
+print("  - q o ESC: esci (autosave sempre)\n")
 
 # ------------------ MAIN LOOP ------------------
 try:
@@ -200,11 +179,9 @@ try:
         if key == -1:
             continue
 
-        # exit
         if key == ord('q') or key == 27:
             break
 
-        # undo
         elif key == ord('z'):
             if expecting == 2:
                 if len(pts1) > 0:
@@ -216,18 +193,18 @@ try:
                 expecting = 2
                 print("↩️ Undo: Punto DESTRA rimosso.")
             redraw()
-            save_session()
+            save_state()
 
-        # save point
         elif key == ord(' '):
             save_point()
 
-        # save final
         elif key == ord('f'):
-            save_session()
-            save_final_if_possible()
+            save_state()
+            if len(pts1) == len(pts2) and len(pts1) > 0:
+                print(f"🎉 OK: punti pari. File unico aggiornato: {FINAL_FILE}  ({len(pts1)} coppie)")
+            else:
+                print("⚠️ Punti non pari o zero: il file è salvato comunque (Step2 userà solo le coppie complete).")
 
-        # movement keys (WASD + frecce)
         elif key == ord('w') or key in [63232, 2490368, 82]:
             cursor_y -= 1
         elif key == ord('s') or key in [63233, 2621440, 84]:
@@ -237,28 +214,13 @@ try:
         elif key == ord('d') or key in [63235, 2555904, 83]:
             cursor_x += 1
 
-        # clamp cursor
         cursor_x = max(0, min(cursor_x, combo_orig.shape[1] - 1))
         cursor_y = max(0, min(cursor_y, combo_orig.shape[0] - 1))
 
 except KeyboardInterrupt:
     pass
 
-# ------------------ CLEANUP + SAVE ------------------
 cv2.destroyAllWindows()
 
-save_session()
-print(f"\n💾 Sessione salvata in: {SESSION_FILE}")
-
-if len(pts1) == len(pts2) and len(pts1) > 0:
-    np.savez(
-        FINAL_FILE,
-        pts1=np.array(pts1, dtype=np.float32),
-        pts2=np.array(pts2, dtype=np.float32),
-        undistorted=np.array([0], dtype=np.int32),
-        K=K,
-        dist=dist,
-    )
-    print(f"🎉 Salvato file finale: {FINAL_FILE}")
-else:
-    print("⚠️ Nessun salvataggio finale (punti dispari o zero).")
+save_state()
+print(f"\n💾 File unico salvato/aggiornato in: {FINAL_FILE}")
