@@ -2,6 +2,10 @@ import os
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+import sys
+
+# Camera overlay: OFF by default. Enable with: python step3_reconstruct_and_visualize_camera_toggle.py --cameras
+SHOW_CAMERAS = "--cameras" in sys.argv
 
 IMG1_PATH = "object/img1.JPG"
 CALIB_PATH = "camera_calib.npz"
@@ -109,6 +113,11 @@ def transform_to_plot(pts):
     z_p = -pts[:, 1]
     return x_p, y_p, z_p
 
+
+def camera_center_from_Rt(R, t):
+    """Camera center in world (camera1) coordinates for P=[R|t]."""
+    return (-R.T @ t).reshape(3)
+
 sift_mask = ~is_manual_final
 manual_mask = is_manual_final
 
@@ -122,6 +131,23 @@ if np.sum(sift_mask) > 0:
 if np.sum(manual_mask) > 0:
     xm, ym, zm = transform_to_plot(X[manual_mask])
     ax.scatter(xm, ym, zm, c="red", s=15, edgecolors="black", label=f"Manuali ({n_manual})")
+
+
+
+if SHOW_CAMERAS:
+
+    # ------------------ CAMERAS ------------------
+    # Camera 1 is the world frame origin in this two-view setup.
+    C1 = np.zeros(3)
+    # Camera 2 center in the same world frame (up to scale).
+    C2 = camera_center_from_Rt(R, t)
+
+    C_plot = np.vstack([C1, C2])
+    xc, yc, zc = transform_to_plot(C_plot)
+
+    ax.scatter([xc[0]], [yc[0]], [zc[0]], s=140, marker="^", label="Camera 1")
+    ax.scatter([xc[1]], [yc[1]], [zc[1]], s=140, marker="^", label="Camera 2")
+    ax.plot(xc, yc, zc, linewidth=2)
 
 ax.view_init(elev=5, azim=-90)
 ax.set_xlabel("X (Sinistra-Destra)")
