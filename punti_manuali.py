@@ -4,19 +4,14 @@ import os
 from datetime import datetime
 
 # ============================================================
-#  MANUAL POINTS TOOL (DISTORTED MODE) - SINGLE FILE
+#  MANUAL POINTS TOOL
 #  - Mostra img1/img2 ORIGINALI (DISTORTE)
 #  - I punti salvati (pts1/pts2) sono PIXEL DISTORTI (coordinate immagine originale)
-#  - Salva SOLO 1 file: manual_high_precision_<SESSION_ID>.npz (autosave continuo)
+#  - Salva SOLO 1 file (autosave continuo)
 #  - Disegna linea epipolare sulla foto destra quando selezioni un punto sulla sinistra
 #    (basata su F stimata da OpenCV su immagini DISTORTE)
-#
-#  ✅ NOTA per Step 2:
-#  Tratta questi punti come i SIFT (distorti):
-#     p_norm = cv2.undistortPoints(p_px.reshape(-1,1,2), K, dist).reshape(-1,2)
 # ============================================================
 
-# ------------------ PATHS ------------------
 IMG1_PATH = "object/img1.JPG"
 IMG2_PATH = "object/img2.JPG"
 CALIB_PATH = "camera_calib.npz"
@@ -26,19 +21,21 @@ MANUAL_DIR = "manual_points"
 os.makedirs(OUT_DIR, exist_ok=True)
 os.makedirs(MANUAL_DIR, exist_ok=True)
 
-# Unica sessione = un unico file, sempre aggiornato
+# ------------------------------------------------------------
 SESSION_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
 FINAL_FILE = os.path.join(MANUAL_DIR, f"manual_high_precision_{SESSION_ID}.npz")
 
-print(f"🆔 Sessione: {SESSION_ID}")
-print(f"💾 File unico (autosave): {FINAL_FILE}")
+print(f"Sessione: {SESSION_ID}")
+print(f"File unico (autosave): {FINAL_FILE}")
 
-# ------------------ LOAD CALIB ------------------
+# ------------------------------------------------------------
 cal = np.load(CALIB_PATH)
 K = cal["K"].astype(np.float64)
 dist = cal["dist"].astype(np.float64)
 
-# ------------------ LOAD IMAGES (DISTORTED) ------------------
+# ------------------------------------------------------------
+
+# Carica immagini
 img1 = cv2.imread(IMG1_PATH)
 img2 = cv2.imread(IMG2_PATH)
 assert img1 is not None and img2 is not None, "Errore caricamento immagini."
@@ -51,7 +48,8 @@ combo_orig = cv2.hconcat([img1, img2])
 combo_disp = combo_orig.copy()
 
 # ============================================================
-#  EPIPOLAR: stima F (DISTORTED) con OpenCV (SIFT/ORB + RANSAC)
+# EPIPOLAR: stima F (DISTORTED) con OpenCV (SIFT/ORB + RANSAC)
+# Usata solamente per migliorare l'annotazione dei punti manuali, non utilizzata nelle computazioni
 # ============================================================
 def estimate_F_opencv_distorted(img1_bgr, img2_bgr):
     gray1 = cv2.cvtColor(img1_bgr, cv2.COLOR_BGR2GRAY)
@@ -87,7 +85,7 @@ def estimate_F_opencv_distorted(img1_bgr, img2_bgr):
     pts1 = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
     pts2 = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
 
-    # RANSAC su F nel dominio DISTORTO (coerente con ciò che visualizzi)
+    # RANSAC su F nel dominio DISTORTO
     F, mask = cv2.findFundamentalMat(
         pts1, pts2,
         method=cv2.FM_RANSAC,
@@ -102,24 +100,24 @@ def estimate_F_opencv_distorted(img1_bgr, img2_bgr):
     if int(np.sum(mask)) < 8:
         return None
 
-    # Refinement: ricalcola F con 8-point sui soli inlier (più “pulito”)
     pts1_in = pts1[mask]
     pts2_in = pts2[mask]
     F_ref, _ = cv2.findFundamentalMat(pts1_in, pts2_in, method=cv2.FM_8POINT)
     if F_ref is not None:
         F = F_ref
 
-    # normalizza scala per stabilità numerica
+    # Normalizzazione
     F = F / (np.linalg.norm(F) + 1e-12)
     return F
 
-print("🔎 Stimo F (OpenCV) per disegnare epipolari (su immagini DISTORTE)...")
+print("Stimo F (OpenCV) per disegnare epipolari (su immagini DISTORTE)...")
 F_epi = estimate_F_opencv_distorted(img1, img2)
 if F_epi is None:
-    print("⚠️ Non sono riuscito a stimare F: epipolar line OFF (puoi comunque cliccare e salvare punti).")
+    print("Non sono riuscito a stimare F: epipolar line OFF (puoi comunque cliccare e salvare punti).")
 else:
-    print("✅ F stimata: epipolar line ON")
+    print("F stimata: epipolar line ON")
 
+# 
 def compute_epiline_right_from_left(pt_left):
     """pt_left: (u,v) su immagine sinistra DISTORTA. Ritorna linea su destra ax+by+c=0."""
     if F_epi is None:
@@ -169,18 +167,20 @@ def draw_epiline_on_right(vis, line_right, thickness=2):
     p1d = (p1[0] + w1, p1[1])
     cv2.line(vis, p0d, p1d, (0, 255, 255), thickness)
 
-# ------------------ STATE ------------------
+# ------------------------------------------------------------
+
 pts1 = []
 pts2 = []
-expecting = 1  # 1 = click sinistra, 2 = click destra
+expecting = 1 
 
 cursor_x, cursor_y = w1 // 2, h1 // 2
 zoom_factor = 6
 patch_radius = 30
 
-current_epi_line_right = None  # linea epipolare sulla foto destra (quando scelgo punto sx)
+current_epi_line_right = None 
 
-# ------------------ SAVE HELPERS ------------------
+# ------------------------------------------------------------
+
 def atomic_save_npz(path, **arrays):
     tmp = path + ".tmp.npz"
     np.savez(tmp, **arrays)
@@ -203,18 +203,17 @@ def save_state():
         is_complete=np.array([1 if (len(pts1) == len(pts2) and len(pts1) > 0) else 0], dtype=np.int32),
     )
 
-# ------------------ DRAWING ------------------
+# ------------------------------------------------------------
+
 def redraw():
     global combo_disp
     combo_disp = combo_orig.copy()
 
-    # punti su sinistra (rossi)
     for i, pt in enumerate(pts1):
         cv2.circle(combo_disp, pt, 4, (0, 0, 255), -1)
         cv2.putText(combo_disp, str(i + 1), (pt[0] + 8, pt[1] - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
-    # punti su destra (verdi) + linee match
     for i, pt in enumerate(pts2):
         pt_disp = (int(pt[0] + w1), int(pt[1]))
         cv2.circle(combo_disp, pt_disp, 4, (0, 255, 0), -1)
@@ -223,7 +222,6 @@ def redraw():
         if i < len(pts1):
             cv2.line(combo_disp, pts1[i], pt_disp, (255, 255, 0), 1)
 
-    # ✅ linea epipolare sulla destra quando stai scegliendo il punto dx
     if expecting == 2 and current_epi_line_right is not None:
         draw_epiline_on_right(combo_disp, current_epi_line_right, thickness=2)
 
@@ -238,7 +236,9 @@ def redraw():
         cv2.putText(combo_disp, "F non stimata: epipolar line OFF", (50, 130),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-# --------- LENTE ----------
+# ------------------------------------------------------------
+# Lente d'ingrandimento
+
 def update_lens(frame_for_lens):
     ch, cw = frame_for_lens.shape[:2]
     y_min, y_max = max(0, cursor_y - patch_radius), min(ch, cursor_y + patch_radius)
@@ -271,14 +271,14 @@ def save_point():
         pts1.append((x, y))
         expecting = 2
         update_current_epiline()
-        print(f"✅ Punto {len(pts1)} registrato su SINISTRA (DISTORTED). (epiline -> DESTRA)")
+        print(f"Punto {len(pts1)} registrato su SINISTRA (DISTORTED). (epiline -> DESTRA)")
     elif expecting == 2 and x >= w1:
         pts2.append((x - w1, y))
         expecting = 1
         update_current_epiline()
-        print(f"✅ Punto {len(pts2)} registrato su DESTRA (DISTORTED).")
+        print(f"Punto {len(pts2)} registrato su DESTRA (DISTORTED).")
     else:
-        print("⚠️ Cursore fuori posto! Spostalo nell'immagine corretta.")
+        print("Cursore fuori posto! Spostalo nell'immagine corretta.")
 
     redraw()
     save_state()
@@ -290,7 +290,9 @@ def mouse_callback(event, x, y, flags, param):
     elif event == cv2.EVENT_LBUTTONDOWN:
         save_point()
 
-# ------------------ UI SETUP ------------------
+# ------------------------------------------------------------
+
+# UI
 cv2.namedWindow("Main", cv2.WINDOW_NORMAL)
 cv2.resizeWindow("Main", 1600, 600)
 cv2.namedWindow("Lente", cv2.WINDOW_AUTOSIZE)
@@ -307,7 +309,8 @@ print("  - z: undo ultimo punto (gestisce SX/DX)")
 print("  - f: stampa stato (il file è già autosalvato)")
 print("  - q o ESC: esci (autosave sempre)\n")
 
-# ------------------ MAIN LOOP ------------------
+# ------------------------------------------------------------
+
 try:
     while True:
         temp_disp = combo_disp.copy()
@@ -327,12 +330,12 @@ try:
                     pts1.pop()
                     expecting = 1
                     update_current_epiline()
-                    print("↩️ Undo: Punto SINISTRA rimosso.")
+                    print("Undo: Punto SINISTRA rimosso.")
             elif expecting == 1 and len(pts2) > 0:
                 pts2.pop()
                 expecting = 2
                 update_current_epiline()
-                print("↩️ Undo: Punto DESTRA rimosso.")
+                print("Undo: Punto DESTRA rimosso.")
             redraw()
             save_state()
 
@@ -342,9 +345,9 @@ try:
         elif key == ord('f'):
             save_state()
             if len(pts1) == len(pts2) and len(pts1) > 0:
-                print(f"🎉 OK: punti pari. File unico aggiornato: {FINAL_FILE}  ({len(pts1)} coppie)")
+                print(f"OK: punti pari. File unico aggiornato: {FINAL_FILE}  ({len(pts1)} coppie)")
             else:
-                print("⚠️ Punti non pari o zero: il file è salvato comunque (Step2 userà solo le coppie complete).")
+                print("Punti non pari o zero: il file è salvato comunque (Step2 userà solo le coppie complete).")
 
         elif key == ord('w') or key in [63232, 2490368, 82]:
             cursor_y -= 1
@@ -364,4 +367,4 @@ except KeyboardInterrupt:
 cv2.destroyAllWindows()
 
 save_state()
-print(f"\n💾 File unico salvato/aggiornato in: {FINAL_FILE}")
+print(f"\nFile unico salvato/aggiornato in: {FINAL_FILE}")
