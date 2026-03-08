@@ -208,3 +208,9 @@ __marimo__/
 
 #object
 outputs
+
+# calibrazione 
+camera_calib.npz
+
+
+.DS_Store
